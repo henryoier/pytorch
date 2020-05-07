@@ -10,6 +10,7 @@
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 
 namespace c10d {
 
@@ -108,6 +109,12 @@ class Reducer {
 
   void finalize_backward();
 
+  using GradCallback =
+      torch::distributed::autograd::DistAutogradContext::GradCallback;
+  void runGradCallbackForVariable(
+      torch::autograd::Variable& variable,
+      GradCallback&& cb);
+
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
   //
@@ -186,6 +193,18 @@ class Reducer {
   // the point in time buckets were ready, or ideal bucket assignment/ordering.
   int64_t backward_stats_base_;
   std::vector<std::vector<int64_t>> backward_stats_;
+
+  struct RpcContext {
+    using ContextPtr = torch::distributed::autograd::ContextPtr;
+    using ContextWeakPtr = torch::distributed::autograd::ContextWeakPtr;
+    // The shared_ptr is to hold the context instance.
+    ContextPtr context_ptr_holder;
+    std::atomic<ContextPtr::element_type*> context_ptr{nullptr};
+
+    void set(ContextWeakPtr&& context_weak_ptr);
+    void clear();
+  };
+  RpcContext rpc_context_;
 };
 
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
